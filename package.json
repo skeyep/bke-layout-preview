@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "A BKEngine/BKE script UI layout previewer for quickly inspecting sprites, buttons, layers, text, anchors, and actions.",
   "author": "skeyep <skeyep@qq.com>",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "main": "electron/main.mjs",

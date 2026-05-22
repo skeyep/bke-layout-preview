@@ -343,19 +343,55 @@ textarea,
 }
 
 .preview-toolbar {
-  height: 44px;
+  min-height: 44px;
   border-bottom: 1px solid var(--line);
-  padding: 0 14px;
+  padding: 7px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   color: var(--muted);
   font-size: 13px;
+  flex-wrap: wrap;
 }
 
 #dragHint {
   color: #c7d4d0;
+}
+
+.preview-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.compact-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.compact-field input,
+.compact-field select {
+  min-height: 28px;
+  width: auto;
+  max-width: 118px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+
+.compact-field input {
+  max-width: 64px;
+}
+
+.compact-toggle span {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .viewport {

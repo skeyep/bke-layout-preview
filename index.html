@@ -47,7 +47,25 @@
         <section class="preview-shell">
           <div class="preview-toolbar">
             <span id="cursorReadout">x=0 y=0</span>
-            <span id="dragHint">点击精灵选中，拖动可回写 pos 坐标</span>
+            <div class="preview-controls">
+              <span id="zoomReadout" class="badge">100%</span>
+              <label class="compact-field" title="吸附步长，单位是设计坐标像素">
+                <span>步长</span>
+                <input id="snapSizeInput" type="number" value="10" min="1" max="240" step="1" />
+              </label>
+              <label class="toggle compact-toggle" title="拖拽时吸附到网格">
+                <input id="snapToggle" type="checkbox" />
+                <span><i data-lucide="magnet"></i>吸附</span>
+              </label>
+              <label class="compact-field" title="自动选择会拖动点击的对象；固定选择会始终拖动右侧当前选中的对象">
+                <span>拖拽</span>
+                <select id="dragModeSelect">
+                  <option value="auto">自动选择</option>
+                  <option value="fixed">固定选择</option>
+                </select>
+              </label>
+            </div>
+            <span id="dragHint">滚轮缩放，拖动回写 pos</span>
             <span id="selectedReadout">未选择精灵</span>
           </div>
           <div id="viewport" class="viewport"></div>

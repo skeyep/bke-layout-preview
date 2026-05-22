@@ -13,6 +13,7 @@ import {
   Grid3X3,
   ImageDown,
   Layers3,
+  Magnet,
   RefreshCw,
   SlidersHorizontal,
   Sparkles,
@@ -65,6 +66,10 @@ const dom = {
   pngBtn: document.querySelector('#pngBtn'),
   helpBtn: document.querySelector('#helpBtn'),
   gridToggle: document.querySelector('#gridToggle'),
+  snapToggle: document.querySelector('#snapToggle'),
+  snapSizeInput: document.querySelector('#snapSizeInput'),
+  dragModeSelect: document.querySelector('#dragModeSelect'),
+  zoomReadout: document.querySelector('#zoomReadout'),
   workspace: document.querySelector('.workspace'),
   inspectorForm: document.querySelector('#inspectorForm'),
   propIndex: document.querySelector('#propIndex'),
@@ -98,7 +103,10 @@ const state = {
   renderVersion: 0,
   imageResolveCache: new Map(),
   drag: null,
+  displayRefs: new Map(),
   selectionOutline: null,
+  zoom: 1,
+  fitCanvasWidth: 0,
   history: {
     undo: [],
     redo: [],
@@ -121,6 +129,7 @@ createIcons({
     Grid3x3: Grid3X3,
     ImageDown,
     Layers3,
+    Magnet,
     RefreshCw,
     SlidersHorizontal,
     Sparkles,
@@ -724,6 +733,12 @@ function anchorVector(anchor) {
   return ANCHORS[anchor] ?? ANCHORS.topleft;
 }
 
+function snapCoordinate(value) {
+  if (!dom.snapToggle?.checked) return Math.round(value);
+  const step = clamp(numberOr(dom.snapSizeInput?.value, 10), 1, 240);
+  return Math.round(value / step) * step;
+}
+
 async function nodeSize(scene, node, texture) {
   if (node.type === 'layer') return [node.width ?? DESIGN_WIDTH, node.height ?? DESIGN_HEIGHT];
   if (node.type === 'textsprite') {
@@ -807,6 +822,7 @@ async function buildNode(scene, node, parentContainer, version) {
   container.rotation = (node.rotate * Math.PI) / 180;
   container.zIndex = node.zorder;
   parentContainer.addChild(container);
+  state.displayRefs.set(String(node.index), { container, parentContainer });
 
   if (node.type === 'layer') {
     const layer = new Graphics();
@@ -851,6 +867,7 @@ async function renderScene() {
   const version = ++state.renderVersion;
   const stage = state.app.stage;
   stage.removeChildren();
+  state.displayRefs.clear();
   stage.sortableChildren = true;
   drawBackground(stage);
 
@@ -928,14 +945,30 @@ function selectNode(index, options = {}) {
 
 function startDrag(node, container, parentContainer, event) {
   event.stopPropagation();
-  selectNode(node.index, { render: false });
-  setSelectionOutline(container, node.width, node.height);
-  const local = parentContainer.toLocal(event.global);
+  let dragNode = node;
+  let dragContainer = container;
+  let dragParentContainer = parentContainer;
+  const fixedSelection = dom.dragModeSelect?.value === 'fixed' && state.selectedIndex && state.scene?.nodes.has(String(state.selectedIndex));
+  if (fixedSelection) {
+    dragNode = state.scene.nodes.get(String(state.selectedIndex));
+    const ref = state.displayRefs.get(String(dragNode.index));
+    if (ref) {
+      dragContainer = ref.container;
+      dragParentContainer = ref.parentContainer;
+    } else {
+      dragNode = node;
+      selectNode(node.index, { render: false });
+    }
+  } else {
+    selectNode(node.index, { render: false });
+  }
+  setSelectionOutline(dragContainer, dragNode.width, dragNode.height);
+  const local = dragParentContainer.toLocal(event.global);
   state.drag = {
-    node,
-    container,
-    parentContainer,
-    offset: [local.x - node.pos[0], local.y - node.pos[1]],
+    node: dragNode,
+    container: dragContainer,
+    parentContainer: dragParentContainer,
+    offset: [local.x - dragNode.pos[0], local.y - dragNode.pos[1]],
     beforeSource: dom.scriptInput.value,
   };
   state.app.stage.eventMode = 'static';
@@ -949,7 +982,7 @@ function dragSelectedNode(event) {
   if (!state.drag) return;
   const { node, container, parentContainer, offset } = state.drag;
   const local = parentContainer.toLocal(event.global);
-  node.pos = [Math.round(local.x - offset[0]), Math.round(local.y - offset[1])];
+  node.pos = [snapCoordinate(local.x - offset[0]), snapCoordinate(local.y - offset[1])];
   container.position.set(node.pos[0], node.pos[1]);
   updateInspector();
   updateExport();
@@ -1244,6 +1277,31 @@ function downloadPng() {
   link.click();
 }
 
+function updateCanvasZoom() {
+  if (!state.app?.canvas) return;
+  const viewportRect = dom.viewport.getBoundingClientRect();
+  const maxFitWidth = Math.max(320, viewportRect.width - 36);
+  const maxFitHeight = Math.max(220, viewportRect.height - 36);
+  const fitByWidth = maxFitWidth;
+  const fitByHeight = maxFitHeight * (DESIGN_WIDTH / DESIGN_HEIGHT);
+  state.fitCanvasWidth = Math.max(320, Math.min(fitByWidth, fitByHeight));
+  const width = Math.round(state.fitCanvasWidth * state.zoom);
+  state.app.canvas.style.width = `${width}px`;
+  state.app.canvas.style.maxWidth = 'none';
+  if (dom.zoomReadout) dom.zoomReadout.textContent = `${Math.round(state.zoom * 100)}%`;
+}
+
+function handleViewportWheel(event) {
+  if (!state.app?.canvas) return;
+  event.preventDefault();
+  const previousZoom = state.zoom;
+  const direction = event.deltaY > 0 ? -1 : 1;
+  const factor = event.shiftKey ? 1.04 : 1.1;
+  state.zoom = clamp(direction > 0 ? state.zoom * factor : state.zoom / factor, 0.35, 4);
+  if (Math.abs(state.zoom - previousZoom) < 0.001) return;
+  updateCanvasZoom();
+}
+
 function setupPointerReadout() {
   state.app.canvas.addEventListener('mousemove', (event) => {
     const rect = state.app.canvas.getBoundingClientRect();
@@ -1316,6 +1374,7 @@ async function initPixi() {
   state.app = app;
   dom.viewport.appendChild(app.canvas);
   setupPointerReadout();
+  updateCanvasZoom();
 }
 
 function applyProjectInfo(info) {
@@ -1324,6 +1383,7 @@ function applyProjectInfo(info) {
   DESIGN_WIDTH = Number(width) || 1920;
   DESIGN_HEIGHT = Number(height) || 1080;
   if (state.app) state.app.renderer.resize(DESIGN_WIDTH, DESIGN_HEIGHT);
+  updateCanvasZoom();
 
   const paths = (info.imageSearchPaths ?? []).join(' / ');
   const mode = info.usingSample ? '内置示例' : '当前项目';
@@ -1421,6 +1481,8 @@ function bindEvents() {
     refreshFromInput();
   });
   dom.gridToggle.addEventListener('change', renderScene);
+  dom.viewport.addEventListener('wheel', handleViewportWheel, { passive: false });
+  window.addEventListener('resize', updateCanvasZoom);
   dom.copyBtn.addEventListener('click', copyExport);
   dom.pngBtn.addEventListener('click', downloadPng);
   dom.helpBtn.addEventListener('click', openHelpModal);

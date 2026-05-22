@@ -1,6 +1,6 @@
 {
   "name": "bke-layout-preview",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A BKEngine/BKE script UI layout previewer for quickly inspecting sprites, buttons, layers, text, anchors, and actions.",
   "author": "skeyep <skeyep@qq.com>",
   "license": "MIT",

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BKE UI 布局工作台</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="app-header">
+        <div>
+          <h1>BKE UI 布局工作台</h1>
+          <p id="projectInfo">1920×1080 / 读取项目图片路径中</p>
+        </div>
+        <div class="toolbar">
+          <button id="projectBtn" type="button" title="配置项目目录"><i data-lucide="folder-open"></i><span>项目</span></button>
+          <button id="loadSampleBtn" type="button" title="载入示例"><i data-lucide="file-code-2"></i><span>示例</span></button>
+          <button id="renderBtn" type="button" title="重新渲染"><i data-lucide="refresh-cw"></i><span>渲染</span></button>
+          <button id="copyBtn" type="button" title="复制导出代码"><i data-lucide="copy"></i><span>复制</span></button>
+          <button id="pngBtn" type="button" title="导出预览 PNG"><i data-lucide="image-down"></i><span>PNG</span></button>
+          <button id="helpBtn" type="button" title="打开帮助"><i data-lucide="circle-help"></i><span>帮助</span></button>
+          <label class="toggle" title="显示坐标网格">
+            <input id="gridToggle" type="checkbox" checked />
+            <span><i data-lucide="grid-3x3"></i>网格</span>
+          </label>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="panel code-panel">
+          <div class="panel-title">
+            <span><i data-lucide="braces"></i>BKE 源片段</span>
+            <span id="parseBadge" class="badge">未解析</span>
+          </div>
+          <div class="code-editor">
+            <pre id="highlightLayer" aria-hidden="true"></pre>
+            <textarea id="scriptInput" spellcheck="false" aria-label="BKE 源片段"></textarea>
+          </div>
+          <div class="support-note">
+            支持 @layer / @sprite / @button / @buttonex / @textsprite / @addto / @anchor / 常用 @action；会读取 ## 中简单 var 数组。未挂到舞台的顶层节点会临时显示并提示。
+          </div>
+          <div id="warningList" class="warnings"></div>
+        </section>
+
+        <div class="resize-handle resize-handle-left" data-resize="left" title="拖拽调整左侧宽度"></div>
+
+        <section class="preview-shell">
+          <div class="preview-toolbar">
+            <span id="cursorReadout">x=0 y=0</span>
+            <span id="dragHint">点击精灵选中，拖动可回写 pos 坐标</span>
+            <span id="selectedReadout">未选择精灵</span>
+          </div>
+          <div id="viewport" class="viewport"></div>
+        </section>
+
+        <div class="resize-handle resize-handle-right" data-resize="right" title="拖拽调整右侧宽度"></div>
+
+        <aside class="panel inspector">
+          <div class="panel-title">
+            <span><i data-lucide="layers-3"></i>精灵树</span>
+            <span id="nodeCount" class="badge">0</span>
+          </div>
+          <div id="nodeList" class="node-list"></div>
+
+          <div class="panel-title inspector-title">
+            <span><i data-lucide="sliders-horizontal"></i>属性</span>
+          </div>
+          <form id="inspectorForm" class="inspector-form">
+            <label>index<input id="propIndex" disabled /></label>
+            <label>file<input id="propFile" disabled /></label>
+            <div class="field-grid">
+              <label>x<input id="propX" type="number" step="0.5" /></label>
+              <label>y<input id="propY" type="number" step="0.5" /></label>
+              <label>zorder<input id="propZ" type="number" step="0.5" /></label>
+              <label>opacity<input id="propOpacity" type="number" min="0" max="255" step="1" /></label>
+              <label>scale x<input id="propScaleX" type="number" step="0.5" /></label>
+              <label>scale y<input id="propScaleY" type="number" step="0.5" /></label>
+              <label>rotate<input id="propRotate" type="number" step="0.5" /></label>
+              <label>anchor
+                <select id="propAnchor">
+                  <option value="topleft">topleft</option>
+                  <option value="topcenter">topcenter</option>
+                  <option value="topright">topright</option>
+                  <option value="leftcenter">leftcenter</option>
+                  <option value="center">center</option>
+                  <option value="rightcenter">rightcenter</option>
+                  <option value="bottomleft">bottomleft</option>
+                  <option value="bottomcenter">bottomcenter</option>
+                  <option value="bottomright">bottomright</option>
+                </select>
+              </label>
+            </div>
+          </form>
+
+          <div class="panel-title inspector-title">
+            <span><i data-lucide="file-output"></i>整理后的完整片段</span>
+          </div>
+          <textarea id="exportOutput" spellcheck="false" readonly></textarea>
+        </aside>
+      </main>
+
+      <div id="setupModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="setupTitle">
+        <section class="modal">
+          <div class="modal-title">
+            <div>
+              <h2 id="setupTitle">配置 BKE 项目</h2>
+              <p>选择包含 <code>config.bkpsr</code> 的项目根目录。工具会读取分辨率和 <code>ImageAutoSearchPath</code> 来解析图片。</p>
+            </div>
+            <button id="setupCloseBtn" class="icon-button" type="button" title="关闭"><i data-lucide="x"></i></button>
+          </div>
+          <label class="path-field">
+            <span>项目根目录</span>
+            <input id="projectRootInput" type="text" spellcheck="false" placeholder="D:\path\to\bke-project" />
+          </label>
+          <div class="modal-actions">
+            <button id="browseProjectBtn" type="button"><i data-lucide="folder-search"></i><span>浏览</span></button>
+            <button id="useSampleBtn" type="button"><i data-lucide="sparkles"></i><span>使用内置示例</span></button>
+            <button id="saveSettingsBtn" type="button" class="primary"><i data-lucide="check"></i><span>保存并载入</span></button>
+          </div>
+          <div id="setupError" class="setup-error"></div>
+        </section>
+      </div>
+
+      <div id="helpModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+        <section class="modal help-modal">
+          <div class="modal-title">
+            <div>
+              <h2 id="helpTitle">使用帮助</h2>
+              <p>把 BKE 片段贴进左侧，右侧会显示精灵树和可回写的坐标属性。</p>
+            </div>
+            <button id="helpCloseBtn" class="icon-button" type="button" title="关闭"><i data-lucide="x"></i></button>
+          </div>
+          <div class="help-grid">
+            <article>
+              <h3>1. 配置项目</h3>
+              <p>点“项目”，选择有 <code>config.bkpsr</code> 的目录。图片会按 <code>ImageAutoSearchPath</code> 搜索，脚本里仍使用 BKE 风格相对路径。</p>
+            </article>
+            <article>
+              <h3>2. 预览片段</h3>
+              <p>支持 <code>@sprite</code>、<code>@button</code>、<code>@buttonex</code>、<code>@layer</code>、<code>@textsprite</code>、<code>@addto</code>、<code>@anchor</code> 和常用 <code>@action</code>。</p>
+            </article>
+            <article>
+              <h3>3. 调坐标</h3>
+              <p>点击画布或精灵树选中精灵，拖动会回写 <code>pos=[x,y]</code>；右侧属性面板可调整透明度、缩放、旋转、锚点和层级。</p>
+            </article>
+            <article>
+              <h3>4. 发布包</h3>
+              <p>开源 release 内置的示例资源由 Pillow 生成，不包含任何项目素材。Windows 可用 <code>npm run pack:win</code> 生成便携 EXE。</p>
+            </article>
+          </div>
+        </section>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

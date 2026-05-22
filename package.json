@@ -1,0 +1,52 @@
+{
+  "name": "bke-layout-preview",
+  "version": "0.1.0",
+  "description": "A BKEngine/BKE script UI layout previewer for quickly inspecting sprites, buttons, layers, text, anchors, and actions.",
+  "author": "skeyep <skeyep@qq.com>",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "prebuild": "tools\\release\\clean-dist.cmd",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "sample:assets": "python tools/sample/generate_sample_assets.py",
+    "app": "npm run sample:assets && npm run build && electron .",
+    "pack:win": "npm run sample:assets && npm run build && electron-builder --win dir",
+    "pack:win-portable": "npm run sample:assets && npm run build && electron-builder --win portable"
+  },
+  "dependencies": {
+    "lucide": "^0.468.0",
+    "pixi.js": "^8.5.2"
+  },
+  "devDependencies": {
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1",
+    "rollup": "npm:@rollup/wasm-node@4.60.4",
+    "vite": "^8.0.14"
+  },
+  "build": {
+    "appId": "org.bke.layout-preview",
+    "productName": "BKE Layout Preview",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server/**/*",
+      "sample_project/**/*",
+      "package.json"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        "dir"
+      ]
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    }
+  }
+}

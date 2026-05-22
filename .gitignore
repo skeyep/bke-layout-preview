@@ -1,0 +1,13 @@
+node_modules/
+dist/
+release/
+qa-screenshots/
+
+.bke-layout-preview.json
+*.log
+*_stdout.txt
+*_stderr.txt
+
+.DS_Store
+Thumbs.db
+npm-debug.log*

@@ -6,11 +6,17 @@ import { fileURLToPath } from 'node:url';
 const version = process.argv[2]?.trim();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
+function executable(command) {
+  if (process.platform !== 'win32') return command;
+  if (command === 'npm') return 'npm.cmd';
+  if (command === 'npx') return 'npx.cmd';
+  return command;
+}
+
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
+  const result = spawnSync(executable(command), args, {
     cwd: root,
     stdio: 'inherit',
-    shell: process.platform === 'win32',
     ...options,
   });
   if (result.status !== 0) {
@@ -20,10 +26,9 @@ function run(command, args, options = {}) {
 }
 
 function read(command, args) {
-  const result = spawnSync(command, args, {
+  const result = spawnSync(executable(command), args, {
     cwd: root,
     encoding: 'utf8',
-    shell: process.platform === 'win32',
   });
   if (result.status !== 0) {
     const printable = [command, ...args].join(' ');
@@ -54,10 +59,9 @@ function assertGhReady() {
 }
 
 function assertReleaseDoesNotExist(tag) {
-  const result = spawnSync('gh', ['release', 'view', tag], {
+  const result = spawnSync(executable('gh'), ['release', 'view', tag], {
     cwd: root,
     encoding: 'utf8',
-    shell: process.platform === 'win32',
   });
   if (result.status === 0) {
     throw new Error(`GitHub Release already exists: ${tag}`);

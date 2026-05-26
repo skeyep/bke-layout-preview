@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 
-const version = process.argv[2]?.trim();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const packagePath = path.join(root, 'package.json');
 
 function executable(command) {
   if (process.platform !== 'win32') return command;
@@ -39,8 +40,53 @@ function read(command, args) {
 
 function assertVersion(value) {
   if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value ?? '')) {
-    throw new Error('Usage: npm run release:portable -- 0.2.1');
+    throw new Error('Version must look like 0.2.1. Usage: npm run release:portable -- 0.2.1');
   }
+}
+
+function parseVersion(value) {
+  const match = String(value ?? '').match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/);
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    prerelease: match[4] ?? '',
+  };
+}
+
+function comparePrerelease(a, b) {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  const left = a.split('.');
+  const right = b.split('.');
+  const length = Math.max(left.length, right.length);
+  for (let i = 0; i < length; i += 1) {
+    if (left[i] === undefined) return -1;
+    if (right[i] === undefined) return 1;
+    const leftNumber = /^\d+$/.test(left[i]) ? Number(left[i]) : null;
+    const rightNumber = /^\d+$/.test(right[i]) ? Number(right[i]) : null;
+    if (leftNumber !== null && rightNumber !== null && leftNumber !== rightNumber) return leftNumber > rightNumber ? 1 : -1;
+    if (leftNumber !== null && rightNumber === null) return -1;
+    if (leftNumber === null && rightNumber !== null) return 1;
+    if (left[i] !== right[i]) return left[i] > right[i] ? 1 : -1;
+  }
+  return 0;
+}
+
+function compareVersions(a, b) {
+  const left = parseVersion(a);
+  const right = parseVersion(b);
+  if (!left || !right) throw new Error(`Unable to compare versions: ${a}, ${b}`);
+  for (const key of ['major', 'minor', 'patch']) {
+    if (left[key] !== right[key]) return left[key] > right[key] ? 1 : -1;
+  }
+  return comparePrerelease(left.prerelease, right.prerelease);
+}
+
+function currentPackageVersion() {
+  return JSON.parse(fs.readFileSync(packagePath, 'utf8')).version;
 }
 
 function portableArtifactName(value) {
@@ -52,6 +98,18 @@ function assertCleanTree() {
   if (status) {
     throw new Error(`Working tree is not clean. Commit or stash changes first:\n${status}`);
   }
+}
+
+function assertOnMainBranch() {
+  const branch = read('git', ['branch', '--show-current']);
+  if (branch !== 'main') {
+    throw new Error(`Release must run from main, but current branch is ${branch || '(detached)'}.`);
+  }
+}
+
+function assertLocalTagDoesNotExist(tag) {
+  const existing = read('git', ['tag', '--list', tag]);
+  if (existing) throw new Error(`Local git tag already exists: ${tag}`);
 }
 
 function assertGhReady() {
@@ -73,14 +131,35 @@ function restoreGeneratedSampleIfNeeded() {
   if (status) run('git', ['restore', '--', 'sample_project']);
 }
 
+async function promptVersion() {
+  const cliVersion = process.argv[2]?.trim();
+  if (cliVersion) return cliVersion;
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await rl.question('Release version (for example 0.2.2): ')).trim();
+  } finally {
+    rl.close();
+  }
+}
+
+const version = await promptVersion();
+const currentVersion = currentPackageVersion();
+
 assertVersion(version);
+if (compareVersions(version, currentVersion) <= 0) {
+  throw new Error(`Release version ${version} must be greater than current version ${currentVersion}.`);
+}
 
 const tag = `v${version}`;
 const artifact = path.join(root, 'release', portableArtifactName(version));
 
 assertCleanTree();
+assertOnMainBranch();
 assertGhReady();
+assertLocalTagDoesNotExist(tag);
 assertReleaseDoesNotExist(tag);
+
+console.log(`Publishing BKE Layout Preview ${currentVersion} -> ${version}`);
 
 run('npm', ['version', version, '--no-git-tag-version']);
 run('npm', ['test']);

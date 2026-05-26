@@ -11,6 +11,7 @@
     "dev": "vite --host 127.0.0.1",
     "prebuild": "tools\\release\\clean-dist.cmd",
     "build": "vite build",
+    "test": "node --test",
     "preview": "vite preview --host 127.0.0.1",
     "sample:assets": "python tools/sample/generate_sample_assets.py",
     "app": "npm run sample:assets && npm run build && electron .",

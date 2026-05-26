@@ -16,7 +16,8 @@
     "sample:assets": "python tools/sample/generate_sample_assets.py",
     "app": "npm run sample:assets && npm run build && electron .",
     "pack:win": "npm run sample:assets && npm run build && electron-builder --win dir",
-    "pack:win-portable": "npm run sample:assets && npm run build && electron-builder --win portable"
+    "pack:win-portable": "npm run sample:assets && npm run build && electron-builder --win portable",
+    "release:portable": "node tools/release/publish-portable.mjs"
   },
   "dependencies": {
     "lucide": "^0.468.0",

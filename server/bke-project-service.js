@@ -145,6 +145,7 @@ export function createBkeProjectService(options) {
     || findBkeProjectRoot(process.cwd())
     || findBkeProjectRoot(path.resolve(toolRoot, '../..'));
   const pickDirectory = options.pickDirectory;
+  const updateChecker = options.updateChecker;
 
   function readSettings() {
     return readJsonFile(settingsPath);
@@ -282,6 +283,34 @@ export function createBkeProjectService(options) {
       }
       const selected = await pickDirectory();
       sendJson(res, 200, selected ? { ok: true, projectRoot: toSlash(selected) } : { ok: false, cancelled: true });
+      return true;
+    }
+
+    if (url.pathname === '/api/update/check') {
+      if (!updateChecker?.check) {
+        sendJson(res, 501, { ok: false, error: 'Update checks are only available in the desktop app.' });
+        return true;
+      }
+      try {
+        sendJson(res, 200, await updateChecker.check());
+      } catch (error) {
+        sendJson(res, 503, { ok: false, error: error.message || 'Unable to check GitHub releases.' });
+      }
+      return true;
+    }
+
+    if (url.pathname === '/api/update/open' && req.method === 'POST') {
+      if (!updateChecker?.open) {
+        sendJson(res, 501, { ok: false, error: 'Update downloads are only available in the desktop app.' });
+        return true;
+      }
+      try {
+        const body = JSON.parse((await readRequestBody(req)) || '{}');
+        await updateChecker.open(body.url);
+        sendJson(res, 200, { ok: true });
+      } catch (error) {
+        sendJson(res, 400, { ok: false, error: error.message || 'Unable to open update download.' });
+      }
       return true;
     }
 

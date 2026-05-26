@@ -19,6 +19,7 @@
           <button id="copyBtn" type="button" title="复制导出代码"><i data-lucide="copy"></i><span>复制</span></button>
           <button id="pngBtn" type="button" title="导出预览 PNG"><i data-lucide="image-down"></i><span>PNG</span></button>
           <button id="helpBtn" type="button" title="打开帮助"><i data-lucide="circle-help"></i><span>帮助</span></button>
+          <button id="updateBtn" type="button" title="检查 GitHub Release 更新"><i data-lucide="refresh-cw"></i><span>更新</span></button>
           <label class="toggle" title="显示坐标网格">
             <input id="gridToggle" type="checkbox" checked />
             <span><i data-lucide="grid-3x3"></i>网格</span>
@@ -169,6 +170,7 @@
         </section>
       </div>
       <div id="sourceToast" class="source-toast hidden" role="status" aria-live="polite"></div>
+      <div id="updateNotice" class="update-notice hidden" role="status" aria-live="polite"></div>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

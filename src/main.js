@@ -54,6 +54,7 @@ const dom = {
   copyBtn: document.querySelector('#copyBtn'),
   pngBtn: document.querySelector('#pngBtn'),
   helpBtn: document.querySelector('#helpBtn'),
+  updateBtn: document.querySelector('#updateBtn'),
   gridToggle: document.querySelector('#gridToggle'),
   snapToggle: document.querySelector('#snapToggle'),
   snapSizeInput: document.querySelector('#snapSizeInput'),
@@ -81,6 +82,7 @@ const dom = {
   helpModal: document.querySelector('#helpModal'),
   helpCloseBtn: document.querySelector('#helpCloseBtn'),
   sourceToast: document.querySelector('#sourceToast'),
+  updateNotice: document.querySelector('#updateNotice'),
 };
 
 const LAYOUT_SIZE_KEY = 'bke-layout-preview:layout-sizes';
@@ -110,6 +112,11 @@ const state = {
   inspectorBefore: null,
   layoutResize: null,
   sourceToastTimer: 0,
+  update: {
+    abortController: null,
+    noticeTimer: 0,
+    lastResult: null,
+  },
 };
 
 createIcons({
@@ -561,6 +568,115 @@ function showSourceToast(message) {
   state.sourceToastTimer = window.setTimeout(() => {
     dom.sourceToast.classList.add('hidden');
   }, 3600);
+}
+
+function hideUpdateNotice() {
+  if (!dom.updateNotice) return;
+  window.clearTimeout(state.update.noticeTimer);
+  dom.updateNotice.classList.add('hidden');
+  dom.updateNotice.replaceChildren();
+}
+
+function showUpdateNotice(message, actions = []) {
+  if (!dom.updateNotice) return;
+  window.clearTimeout(state.update.noticeTimer);
+  dom.updateNotice.replaceChildren();
+  const text = document.createElement('div');
+  text.className = 'update-notice-text';
+  text.textContent = message;
+  dom.updateNotice.appendChild(text);
+  if (actions.length) {
+    const actionRow = document.createElement('div');
+    actionRow.className = 'update-notice-actions';
+    for (const action of actions) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = action.label;
+      if (action.primary) button.classList.add('primary');
+      button.addEventListener('click', action.onClick);
+      actionRow.appendChild(button);
+    }
+    dom.updateNotice.appendChild(actionRow);
+  }
+  dom.updateNotice.classList.remove('hidden');
+}
+
+function updateDownloadUrl(result) {
+  return result?.asset?.url || result?.releaseUrl || '';
+}
+
+async function openUpdateDownload(result) {
+  const url = updateDownloadUrl(result);
+  if (!url) {
+    showUpdateNotice('最新 GitHub Release 里没有找到可下载的更新包。', [
+      { label: '关闭', onClick: hideUpdateNotice },
+    ]);
+    return;
+  }
+  try {
+    await apiJson('/api/update/open', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+    hideUpdateNotice();
+  } catch (error) {
+    showUpdateNotice(`无法打开更新下载链接：${error.message}`, [
+      { label: '关闭', onClick: hideUpdateNotice },
+    ]);
+  }
+}
+
+async function checkForUpdates(options = {}) {
+  const silent = options.silent === true;
+  if (state.update.abortController) state.update.abortController.abort();
+  const abortController = new AbortController();
+  state.update.abortController = abortController;
+
+  if (!silent) {
+    showUpdateNotice('正在检查 GitHub Release 更新...', [
+      {
+        label: '取消',
+        onClick: () => {
+          abortController.abort();
+          hideUpdateNotice();
+        },
+      },
+    ]);
+  }
+
+  let timeout = 0;
+  try {
+    timeout = window.setTimeout(() => abortController.abort(), 9000);
+    const response = await fetch('/api/update/check', { signal: abortController.signal });
+    window.clearTimeout(timeout);
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `Update check failed: ${response.status}`);
+    if (!result.ok) throw new Error(result.error || 'Update check is unavailable in this runtime.');
+    state.update.lastResult = result;
+    if (result.hasUpdate) {
+      const assetName = result.asset?.name ? ` (${result.asset.name})` : '';
+      showUpdateNotice(`发现新版本 ${result.latestVersion}${assetName}，要从 GitHub Release 下载吗？`, [
+        { label: '取消', onClick: hideUpdateNotice },
+        { label: '下载', primary: true, onClick: () => openUpdateDownload(result) },
+      ]);
+    } else if (!silent) {
+      showUpdateNotice(`已经是最新版本（${result.currentVersion}）。`, [
+        { label: '关闭', onClick: hideUpdateNotice },
+      ]);
+      state.update.noticeTimer = window.setTimeout(hideUpdateNotice, 3200);
+    }
+  } catch (error) {
+    if (abortController.signal.aborted) {
+      if (!silent) showUpdateNotice('已取消检查更新。', [{ label: '关闭', onClick: hideUpdateNotice }]);
+    } else if (!silent) {
+      showUpdateNotice(`无法检查 GitHub Release：${error.message}`, [
+        { label: '关闭', onClick: hideUpdateNotice },
+      ]);
+    }
+  } finally {
+    window.clearTimeout(timeout);
+    if (state.update.abortController === abortController) state.update.abortController = null;
+  }
 }
 
 function updateVariablePositionSource(lines, rawPos, nextPos) {
@@ -1119,6 +1235,7 @@ function bindEvents() {
   dom.copyBtn.addEventListener('click', copyExport);
   dom.pngBtn.addEventListener('click', downloadPng);
   dom.helpBtn.addEventListener('click', openHelpModal);
+  dom.updateBtn?.addEventListener('click', () => checkForUpdates({ silent: false }));
   dom.setupCloseBtn.addEventListener('click', closeSetupModal);
   dom.helpCloseBtn.addEventListener('click', closeHelpModal);
   dom.saveSettingsBtn.addEventListener('click', () => saveProjectSettings(false));
@@ -1150,6 +1267,7 @@ async function boot() {
   dom.scriptInput.value = state.sampleScript;
   refreshFromInput();
   if (state.settings?.needsSetup) openSetupModal();
+  window.setTimeout(() => checkForUpdates({ silent: true }), 1200);
 }
 
 boot();

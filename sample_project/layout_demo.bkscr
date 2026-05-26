@@ -4,6 +4,7 @@
 ##
 var cards = [[172, 264], [548, 264], [924, 264]];
 var panelFile = "ui/panel_main";
+var thumbFiles = ["card_frame", "badge_star"];
 ##
 
 @sprite index=1000 file="bg/workbench_day"
@@ -50,11 +51,24 @@ var panelFile = "ui/panel_main";
 @sprite index=2051 file="ui/demo_atlas" rect=[192,0,180,72]
 @addto index=2051 target=1200 pos=[252,564] zorder=5 opacity=255
 
+for (var i=0; i<thumbFiles.length; i++)
+@sprite index=2100+i file="ui/"+thumbFiles[i]
+@addto index=2100+i target=1200 pos=[52+i*128,660] zorder=6 opacity=220
+next
+
 @button index=3000 idle="button/button_idle" hover="button/button_hover"
 @addto index=3000 target=basic_layer pos=[1454,822] zorder=12 opacity=255
+@spriteopt index=3000 disable=true
 
 @buttonex index=3010 idle=3000 hover=3000
 @addto index=3010 target=basic_layer pos=[118,922] zorder=12 opacity=190
 
+@textstyle size=30 color=0xEEF5F1
 @textsprite index=4000 text="TextSprite: coordinates, zorder and parent layers" size=32 color=0xEEF5F1
 @addto index=4000 target=basic_layer pos=[128,116] zorder=20 opacity=255
+
+@textstyle size=26 color=0xFFD166
+@NameText index=4010 name="NameText preview"
+@addto index=4010 target=basic_layer pos=[128,158] zorder=20 opacity=255
+
+@quake time=200 hmax=8 vmax=2

@@ -37,7 +37,7 @@
             <textarea id="scriptInput" spellcheck="false" aria-label="BKE 源片段"></textarea>
           </div>
           <div class="support-note">
-            支持 @layer / @sprite / @button / @buttonex / @textsprite / @addto / @anchor / 常用 @action；会读取 ## 中简单 var 数组。未挂到舞台的顶层节点会临时显示并提示。
+            支持 @layer / @sprite / @button / @buttonex / @textsprite / @textstyle / @spriteopt / @addto / @anchor / 常用 @action；会读取 ## 中简单 var、变量表达式和简单 for/next。未挂到舞台的顶层节点会临时显示并提示。
           </div>
           <div id="warningList" class="warnings"></div>
         </section>
@@ -155,7 +155,7 @@
             </article>
             <article>
               <h3>2. 预览片段</h3>
-              <p>支持 <code>@sprite</code>、<code>@button</code>、<code>@buttonex</code>、<code>@layer</code>、<code>@textsprite</code>、<code>@addto</code>、<code>@anchor</code> 和常用 <code>@action</code>。</p>
+              <p>支持 <code>@sprite</code>、<code>@button</code>、<code>@buttonex</code>、<code>@layer</code>、<code>@textsprite</code>、<code>@textstyle</code>、<code>@spriteopt</code>、<code>@addto</code>、<code>@anchor</code>、常用 <code>@action</code> 和简单 <code>for/next</code>。</p>
             </article>
             <article>
               <h3>3. 调坐标</h3>
@@ -168,6 +168,7 @@
           </div>
         </section>
       </div>
+      <div id="sourceToast" class="source-toast hidden" role="status" aria-live="polite"></div>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

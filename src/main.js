@@ -80,7 +80,10 @@ const dom = {
   setupError: document.querySelector('#setupError'),
   helpModal: document.querySelector('#helpModal'),
   helpCloseBtn: document.querySelector('#helpCloseBtn'),
+  sourceToast: document.querySelector('#sourceToast'),
 };
+
+const LAYOUT_SIZE_KEY = 'bke-layout-preview:layout-sizes';
 
 const state = {
   app: null,
@@ -96,6 +99,9 @@ const state = {
   selectionOutline: null,
   zoom: 1,
   fitCanvasWidth: 0,
+  zoomAnchor: null,
+  zoomAnchorTimer: 0,
+  drawSerial: 0,
   history: {
     undo: [],
     redo: [],
@@ -103,6 +109,7 @@ const state = {
   },
   inspectorBefore: null,
   layoutResize: null,
+  sourceToastTimer: 0,
 };
 
 createIcons({
@@ -239,6 +246,7 @@ function drawPlaceholder(container, node, width, height) {
 
 async function buildNode(scene, node, parentContainer, version) {
   if (version !== state.renderVersion) return null;
+  if (node.visible === false) return null;
   const texture = await loadTextureForNode(scene, node);
   const [width, height] = await nodeSize(scene, node, texture);
   node.width = width;
@@ -249,12 +257,15 @@ async function buildNode(scene, node, parentContainer, version) {
   container.position.set(node.pos[0], node.pos[1]);
   const [ax, ay] = anchorVector(node.anchor);
   container.pivot.set(ax * width, ay * height);
-  container.alpha = Math.max(0, Math.min(1, node.opacity / 255));
+  const hasDisabledTexture = (node.type === 'button' || node.type === 'buttonex') && Boolean(node.buttonDisable);
+  const disabledDim = node.disabled && !hasDisabledTexture ? 0.55 : 1;
+  container.alpha = Math.max(0, Math.min(1, (node.opacity / 255) * disabledDim));
   container.scale.set(node.scaleX / 100, node.scaleY / 100);
   container.rotation = (node.rotate * Math.PI) / 180;
   container.zIndex = node.zorder;
   parentContainer.addChild(container);
-  state.displayRefs.set(String(node.index), { container, parentContainer });
+  state.drawSerial += 1;
+  state.displayRefs.set(String(node.index), { container, parentContainer, node, drawOrder: state.drawSerial });
 
   if (node.type === 'layer') {
     const layer = new Graphics();
@@ -282,11 +293,6 @@ async function buildNode(scene, node, parentContainer, version) {
   }
 
   if (String(node.index) === state.selectedIndex) setSelectionOutline(container, width, height);
-  container.eventMode = 'static';
-  container.cursor = 'move';
-  container.hitArea = new Rectangle(0, 0, width, height);
-  container.on('pointerdown', (event) => startDrag(node, container, parentContainer, event));
-
   for (const childIndex of node.children) {
     const child = scene.nodes.get(childIndex);
     if (child) await buildNode(scene, child, container, version);
@@ -300,6 +306,7 @@ async function renderScene() {
   const stage = state.app.stage;
   stage.removeChildren();
   state.displayRefs.clear();
+  state.drawSerial = 0;
   stage.sortableChildren = true;
   drawBackground(stage);
 
@@ -325,10 +332,37 @@ async function renderScene() {
 }
 
 function updateWarnings() {
-  const uniqueWarnings = [...new Set(state.scene?.warnings ?? [])].slice(0, 80);
-  dom.warningList.innerHTML = uniqueWarnings.length
-    ? uniqueWarnings.map((warning) => `<div class="warning-item"><strong>!</strong><span>${escapeHtml(warning)}</span></div>`).join('')
+  const entries = warningEntries(state.scene).slice(0, 80);
+  dom.warningList.innerHTML = entries.length
+    ? entries.map((entry) => `<div class="warning-item warning-${escapeHtml(entry.level)}"><strong>${escapeHtml(entry.label)}</strong><span>${escapeHtml(entry.message)}</span></div>`).join('')
     : '<span>没有路径或语法警告。</span>';
+}
+
+function warningEntries(scene) {
+  if (!scene) return [];
+  const entries = [];
+  const seen = new Set();
+  for (const item of scene.warningItems ?? []) {
+    if (seen.has(item.text)) continue;
+    seen.add(item.text);
+    entries.push(item);
+  }
+  for (const warning of scene.warnings ?? []) {
+    if (seen.has(warning)) continue;
+    seen.add(warning);
+    entries.push(warningEntryFromText(warning));
+  }
+  return entries;
+}
+
+function warningEntryFromText(warning) {
+  const text = String(warning);
+  const match = text.match(/^(无视觉影响|可能影响布局|不支持)：(.+)$/);
+  if (match) {
+    const level = match[1] === '无视觉影响' ? 'info' : match[1] === '可能影响布局' ? 'layout' : 'unsupported';
+    return { level, label: match[1], message: match[2], text };
+  }
+  return { level: 'layout', label: '提示', message: text, text };
 }
 
 function updateNodeList() {
@@ -339,7 +373,8 @@ function updateNodeList() {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = `node-row${String(node.index) === state.selectedIndex ? ' active' : ''}`;
-    row.innerHTML = `<span class="node-index">${escapeHtml(node.index)}</span><span class="node-file">${escapeHtml(displayFile(state.scene, node) || node.type)}</span><span class="node-z">z=${formatNumber(node.zorder)}</span>`;
+    const stateLabel = node.visible === false ? 'hidden' : node.disabled ? 'disabled' : `z=${formatNumber(node.zorder)}`;
+    row.innerHTML = `<span class="node-index">${escapeHtml(node.index)}</span><span class="node-file">${escapeHtml(displayFile(state.scene, node) || node.type)}</span><span class="node-z">${escapeHtml(stateLabel)}</span>`;
     row.addEventListener('click', () => selectNode(node.index));
     dom.nodeList.appendChild(row);
   }
@@ -375,6 +410,33 @@ function selectNode(index, options = {}) {
   if (options.render !== false) renderScene();
 }
 
+function hitTestDisplayRef(ref, globalPoint) {
+  const { node, container } = ref;
+  if (!node || node.visible === false || node.opacity <= 0 || !container.worldTransform) return false;
+  const local = container.worldTransform.applyInverse(globalPoint, {});
+  return local.x >= 0 && local.y >= 0 && local.x <= node.width && local.y <= node.height;
+}
+
+function findNodeAtPoint(globalPoint) {
+  const hits = [...state.displayRefs.values()]
+    .filter((ref) => hitTestDisplayRef(ref, globalPoint))
+    .sort((a, b) => a.drawOrder - b.drawOrder);
+  return hits.at(-1) ?? null;
+}
+
+function updateCanvasCursor(isDragging = false, globalPoint = null) {
+  if (!state.app?.canvas) return;
+  state.app.canvas.classList.toggle('dragging', Boolean(isDragging));
+  const hasTarget = !isDragging && globalPoint && Boolean(findNodeAtPoint(globalPoint));
+  state.app.canvas.classList.toggle('drag-target', Boolean(hasTarget));
+}
+
+function handleStagePointerDown(event) {
+  const ref = findNodeAtPoint(event.global);
+  if (!ref) return;
+  startDrag(ref.node, ref.container, ref.parentContainer, event);
+}
+
 function startDrag(node, container, parentContainer, event) {
   event.stopPropagation();
   let dragNode = node;
@@ -408,6 +470,7 @@ function startDrag(node, container, parentContainer, event) {
   state.app.stage.on('pointermove', dragSelectedNode);
   state.app.stage.once('pointerup', stopDrag);
   state.app.stage.once('pointerupoutside', stopDrag);
+  updateCanvasCursor(true);
 }
 
 function dragSelectedNode(event) {
@@ -418,7 +481,7 @@ function dragSelectedNode(event) {
   container.position.set(node.pos[0], node.pos[1]);
   updateInspector();
   updateExport();
-  updateSourceForNode(node);
+  updateSourceForNode(node, { appendMissing: false, warnUnwritable: false });
 }
 
 function stopDrag() {
@@ -426,34 +489,158 @@ function stopDrag() {
   const before = state.drag.beforeSource;
   const node = state.drag.node;
   state.app.stage.off('pointermove', dragSelectedNode);
-  updateSourceForNode(node);
+  updateSourceForNode(node, { appendMissing: true });
   pushHistory(before, dom.scriptInput.value);
   state.drag = null;
+  updateCanvasCursor(false);
 }
 
-function updateSourceForNode(node) {
+function updateSourceForNode(node, options = {}) {
+  const appendMissing = options.appendMissing !== false;
+  const warnUnwritable = options.warnUnwritable !== false;
+  const before = dom.scriptInput.value;
   const lines = dom.scriptInput.value.split(/\r?\n/);
   const addto = [...node.sourceCommands].reverse().find((item) => item.name === 'addto');
+  const positionUpdatedInVariable = addto ? updateVariablePositionSource(lines, addto.rawArgs?.pos, node.pos) : false;
   const replacements = {
-    pos: `pos=[${formatNumber(node.pos[0])},${formatNumber(node.pos[1])}]`,
     zorder: `zorder=${formatNumber(node.zorder)}`,
     opacity: `opacity=${formatNumber(node.opacity)}`,
   };
+  if (!positionUpdatedInVariable) replacements.pos = `pos=[${formatNumber(node.pos[0])},${formatNumber(node.pos[1])}]`;
   if (addto && lines[addto.lineNumber - 1] !== undefined) {
-    const line = lines[addto.lineNumber - 1];
-    lines[addto.lineNumber - 1] = replaceOrAppendArgs(line, replacements);
-  } else if (node.parent) {
-    lines.push(`@addto index=${node.index} target=${node.parent} ${replacements.pos} ${replacements.zorder} ${replacements.opacity}`);
+    if (isDirectSourceCommand(addto, node)) {
+      const line = lines[addto.lineNumber - 1];
+      lines[addto.lineNumber - 1] = replaceOrAppendArgs(line, replacements);
+    } else if (warnUnwritable) {
+      showSourceToast(`index=${node.index} 来自循环展开或表达式 @addto，已避免追加新行；如果这个实例需要独立坐标，请改原循环或变量。`);
+    }
+  } else if (node.parent && appendMissing) {
+    lines.push(`@addto index=${node.index} target=${node.parent} pos=[${formatNumber(node.pos[0])},${formatNumber(node.pos[1])}] ${replacements.zorder} ${replacements.opacity}`);
   }
-  dom.scriptInput.value = lines.join('\n');
+  const after = lines.join('\n');
+  dom.scriptInput.value = after;
   syncHighlight();
+  locateSourceChanges(before, after);
+}
+
+function isDirectSourceCommand(command, node) {
+  const rawIndex = String(command.rawArgs?.index ?? '').trim();
+  return rawIndex === String(node.index) || Number(rawIndex) === Number(node.index);
+}
+
+function locateSourceChanges(before, after) {
+  if (before === after) return;
+  const beforeLines = before.split(/\r?\n/);
+  const afterLines = after.split(/\r?\n/);
+  const changedLines = [];
+  const max = Math.max(beforeLines.length, afterLines.length);
+  for (let i = 0; i < max; i += 1) {
+    if (beforeLines[i] !== afterLines[i]) changedLines.push(i + 1);
+  }
+  if (!changedLines.length) return;
+  scrollSourceToLine(changedLines[0]);
+  if (changedLines.length > 1) {
+    showSourceToast(`本次改动影响了 ${changedLines.length} 行，已定位到最上面的第 ${changedLines[0]} 行。`);
+  }
+}
+
+function scrollSourceToLine(lineNumber) {
+  if (!dom.scriptInput) return;
+  const style = getComputedStyle(dom.scriptInput);
+  const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.45 || 20;
+  const targetTop = Math.max(0, (lineNumber - 1) * lineHeight - dom.scriptInput.clientHeight * 0.32);
+  dom.scriptInput.scrollTop = targetTop;
+  syncHighlight();
+}
+
+function showSourceToast(message) {
+  if (!dom.sourceToast) return;
+  dom.sourceToast.textContent = message;
+  dom.sourceToast.classList.remove('hidden');
+  window.clearTimeout(state.sourceToastTimer);
+  state.sourceToastTimer = window.setTimeout(() => {
+    dom.sourceToast.classList.add('hidden');
+  }, 3600);
+}
+
+function updateVariablePositionSource(lines, rawPos, nextPos) {
+  const reference = parseVariableReference(rawPos);
+  if (!reference) return false;
+  const source = state.scene?.variableSources?.get(reference.base);
+  if (!source || lines[source.lineNumber - 1] === undefined) return false;
+  const current = cloneBkeValue(state.scene.variables.get(reference.base));
+  const nextValue = setBkeValueAtPath(current, reference.path, [Number(nextPos[0]), Number(nextPos[1])]);
+  if (nextValue === undefined) return false;
+  lines[source.lineNumber - 1] = replaceAssignmentValue(lines[source.lineNumber - 1], serializeBkeValue(nextValue));
+  state.scene.variables.set(reference.base, nextValue);
+  return true;
+}
+
+function parseVariableReference(rawValue) {
+  const raw = String(rawValue ?? '').trim();
+  const match = raw.match(/^([A-Za-z_$#]\w*(?:\.[A-Za-z_$#]\w*)*)((?:\[[^\]]+\])*)$/);
+  if (!match) return null;
+  const path = [];
+  for (const accessor of match[2].matchAll(/\[([^\]]+)\]/g)) {
+    const key = Number(accessor[1].trim());
+    if (!Number.isInteger(key)) return null;
+    path.push(key);
+  }
+  return {
+    base: match[1].replace(/^[$#]/, '').replace(/^global\./i, ''),
+    path,
+  };
+}
+
+function cloneBkeValue(value) {
+  if (Array.isArray(value)) return value.map((item) => cloneBkeValue(item));
+  if (value && typeof value === 'object') return { ...value };
+  return value;
+}
+
+function setBkeValueAtPath(value, path, nextLeaf) {
+  if (!path.length) return nextLeaf;
+  if (!Array.isArray(value)) return undefined;
+  const next = [...value];
+  let cursor = next;
+  for (let i = 0; i < path.length; i += 1) {
+    const index = path[i] < 0 ? cursor.length + path[i] : path[i];
+    if (index < 0) return undefined;
+    if (i === path.length - 1) {
+      cursor[index] = nextLeaf;
+    } else {
+      if (!Array.isArray(cursor[index])) return undefined;
+      cursor[index] = [...cursor[index]];
+      cursor = cursor[index];
+    }
+  }
+  return next;
+}
+
+function serializeBkeValue(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => serializeBkeValue(item)).join(', ')}]`;
+  if (typeof value === 'string') return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (value === null || value === undefined) return 'void';
+  return formatNumber(value);
+}
+
+function replaceAssignmentValue(line, serializedValue) {
+  const commentIndex = findCommentStart(line);
+  const code = commentIndex === -1 ? line : line.slice(0, commentIndex);
+  const comment = commentIndex === -1 ? '' : line.slice(commentIndex);
+  const eqIndex = code.indexOf('=');
+  if (eqIndex === -1) return line;
+  const prefix = code.slice(0, eqIndex + 1).replace(/\s*$/, ' ');
+  const suffix = code.trimEnd().endsWith(';') ? ';' : '';
+  return `${prefix}${serializedValue}${suffix}${comment}`;
 }
 
 function replaceOrAppendArgs(line, replacements) {
   let next = line;
   for (const [key, replacement] of Object.entries(replacements)) {
     const pattern = key === 'pos'
-      ? /pos=\[[^\]]*\]/
+      ? /\bpos=(?:"[^"]*"|'[^']*'|\[[^\]]*\]|[^\s]+)/
       : new RegExp(`${key}=-?\\d+(?:\\.\\d+)?`);
     next = pattern.test(next) ? next.replace(pattern, replacement) : `${next} ${replacement}`;
   }
@@ -677,12 +864,38 @@ function updateCanvasZoom() {
 function handleViewportWheel(event) {
   if (!state.app?.canvas) return;
   event.preventDefault();
+  const canvas = state.app.canvas;
+  const viewport = dom.viewport;
+  const canvasRect = canvas.getBoundingClientRect();
+  const designX = clamp(((event.clientX - canvasRect.left) / canvasRect.width) * DESIGN_WIDTH, 0, DESIGN_WIDTH);
+  const designY = clamp(((event.clientY - canvasRect.top) / canvasRect.height) * DESIGN_HEIGHT, 0, DESIGN_HEIGHT);
+  if (!state.zoomAnchor || Math.hypot(state.zoomAnchor.clientX - event.clientX, state.zoomAnchor.clientY - event.clientY) > 3) {
+    state.zoomAnchor = { clientX: event.clientX, clientY: event.clientY, designX, designY };
+  }
+  window.clearTimeout(state.zoomAnchorTimer);
+  state.zoomAnchorTimer = window.setTimeout(() => {
+    state.zoomAnchor = null;
+  }, 1000);
+  const anchorX = state.zoomAnchor.designX / DESIGN_WIDTH;
+  const anchorY = state.zoomAnchor.designY / DESIGN_HEIGHT;
   const previousZoom = state.zoom;
   const direction = event.deltaY > 0 ? -1 : 1;
   const factor = event.shiftKey ? 1.04 : 1.1;
   state.zoom = clamp(direction > 0 ? state.zoom * factor : state.zoom / factor, 0.35, 4);
   if (Math.abs(state.zoom - previousZoom) < 0.001) return;
   updateCanvasZoom();
+  alignViewportToZoomAnchor(viewport, canvas, event.clientX, event.clientY, anchorX, anchorY);
+  window.requestAnimationFrame(() => {
+    alignViewportToZoomAnchor(viewport, canvas, event.clientX, event.clientY, anchorX, anchorY);
+  });
+}
+
+function alignViewportToZoomAnchor(viewport, canvas, clientX, clientY, anchorX, anchorY) {
+  const rect = canvas.getBoundingClientRect();
+  const deltaX = rect.left + rect.width * anchorX - clientX;
+  const deltaY = rect.top + rect.height * anchorY - clientY;
+  viewport.scrollLeft = clamp(viewport.scrollLeft + deltaX, 0, Math.max(0, viewport.scrollWidth - viewport.clientWidth));
+  viewport.scrollTop = clamp(viewport.scrollTop + deltaY, 0, Math.max(0, viewport.scrollHeight - viewport.clientHeight));
 }
 
 function setupPointerReadout() {
@@ -691,26 +904,26 @@ function setupPointerReadout() {
     const x = ((event.clientX - rect.left) / rect.width) * DESIGN_WIDTH;
     const y = ((event.clientY - rect.top) / rect.height) * DESIGN_HEIGHT;
     dom.cursorReadout.textContent = `x=${Math.round(x)} y=${Math.round(y)}`;
+    updateCanvasCursor(Boolean(state.drag), { x, y });
   });
+  state.app.canvas.addEventListener('mouseleave', () => updateCanvasCursor(Boolean(state.drag)));
 }
 
 function startLayoutResize(side, handle, event) {
+  event.preventDefault();
   const rect = dom.workspace.getBoundingClientRect();
+  const current = getLayoutPanelWidths();
+  if (current.left) dom.workspace.style.setProperty('--left-panel', `${Math.round(current.left)}px`);
+  if (current.right) dom.workspace.style.setProperty('--right-panel', `${Math.round(current.right)}px`);
   state.layoutResize = {
     side,
     handle,
     rect,
     startX: event.clientX,
-    left: rect.width * 0.27,
-    right: rect.width * 0.24,
+    left: current.left || rect.width * 0.27,
+    right: current.right || rect.width * 0.24,
   };
-  const computed = getComputedStyle(dom.workspace);
-  const leftValue = computed.getPropertyValue('--left-panel').trim();
-  const rightValue = computed.getPropertyValue('--right-panel').trim();
-  const leftMatch = leftValue.match(/(\d+(?:\.\d+)?)px/);
-  const rightMatch = rightValue.match(/(\d+(?:\.\d+)?)px/);
-  if (leftMatch) state.layoutResize.left = Number(leftMatch[1]);
-  if (rightMatch) state.layoutResize.right = Number(rightMatch[1]);
+  handle.setPointerCapture?.(event.pointerId);
   handle.classList.add('dragging');
   document.body.classList.add('resizing-layout');
   window.addEventListener('pointermove', resizeLayout);
@@ -738,7 +951,38 @@ function stopLayoutResize() {
   state.layoutResize.handle.classList.remove('dragging');
   document.body.classList.remove('resizing-layout');
   window.removeEventListener('pointermove', resizeLayout);
+  saveLayoutPanelWidths();
   state.layoutResize = null;
+}
+
+function getLayoutPanelWidths() {
+  const columns = getComputedStyle(dom.workspace).gridTemplateColumns
+    .split(' ')
+    .map((value) => Number.parseFloat(value))
+    .filter((value) => Number.isFinite(value));
+  if (columns.length >= 5) return { left: columns[0], right: columns[4] };
+  const rect = dom.workspace.getBoundingClientRect();
+  return { left: rect.width * 0.27, right: rect.width * 0.24 };
+}
+
+function saveLayoutPanelWidths() {
+  const widths = getLayoutPanelWidths();
+  localStorage.setItem(LAYOUT_SIZE_KEY, JSON.stringify({
+    left: Math.round(widths.left),
+    right: Math.round(widths.right),
+  }));
+}
+
+function applySavedLayoutPanelWidths() {
+  const raw = localStorage.getItem(LAYOUT_SIZE_KEY);
+  if (!raw) return;
+  try {
+    const widths = JSON.parse(raw);
+    if (Number.isFinite(widths.left)) dom.workspace.style.setProperty('--left-panel', `${Math.round(widths.left)}px`);
+    if (Number.isFinite(widths.right)) dom.workspace.style.setProperty('--right-panel', `${Math.round(widths.right)}px`);
+  } catch {
+    localStorage.removeItem(LAYOUT_SIZE_KEY);
+  }
 }
 
 function clamp(value, min, max) {
@@ -755,6 +999,9 @@ async function initPixi() {
     preserveDrawingBuffer: true,
   });
   state.app = app;
+  app.stage.eventMode = 'static';
+  app.stage.hitArea = new Rectangle(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+  app.stage.on('pointerdown', handleStagePointerDown);
   dom.viewport.appendChild(app.canvas);
   setupPointerReadout();
   updateCanvasZoom();
@@ -765,7 +1012,10 @@ function applyProjectInfo(info) {
   const [width, height] = Array.isArray(info.resolution) ? info.resolution : [1920, 1080];
   DESIGN_WIDTH = Number(width) || 1920;
   DESIGN_HEIGHT = Number(height) || 1080;
-  if (state.app) state.app.renderer.resize(DESIGN_WIDTH, DESIGN_HEIGHT);
+  if (state.app) {
+    state.app.renderer.resize(DESIGN_WIDTH, DESIGN_HEIGHT);
+    state.app.stage.hitArea = new Rectangle(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
+  }
   updateCanvasZoom();
 
   const paths = (info.imageSearchPaths ?? []).join(' / ');
@@ -893,6 +1143,7 @@ function bindEvents() {
 }
 
 async function boot() {
+  applySavedLayoutPanelWidths();
   bindEvents();
   await loadProjectInfo();
   await Promise.all([initPixi(), loadSampleScript()]);

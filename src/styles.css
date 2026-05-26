@@ -33,13 +33,17 @@
 html,
 body,
 #app {
-  min-height: 100%;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
+  overflow: hidden;
 }
 
 button,
@@ -147,7 +151,8 @@ button svg,
 }
 
 .workspace {
-  min-height: calc(100vh - 69px);
+  height: calc(100vh - 69px);
+  min-height: 0;
   display: grid;
   grid-template-columns: var(--left-panel) 7px minmax(620px, 1fr) 7px var(--right-panel);
 }
@@ -191,6 +196,8 @@ code {
   background: var(--panel);
   border-right: 1px solid var(--line);
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -198,6 +205,7 @@ code {
 .inspector {
   border-right: 0;
   border-left: 1px solid var(--line);
+  overflow: auto;
 }
 
 .panel-title {
@@ -333,10 +341,44 @@ textarea,
 .warning-item strong {
   color: var(--accent-2);
   font-weight: 600;
+  min-width: 70px;
+}
+
+.warning-info strong {
+  color: #9bd3ff;
+}
+
+.warning-layout strong {
+  color: var(--accent-2);
+}
+
+.warning-unsupported strong {
+  color: var(--danger);
+}
+
+.source-toast {
+  position: fixed;
+  left: max(18px, env(safe-area-inset-left));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 50;
+  max-width: min(520px, calc(100vw - 36px));
+  padding: 10px 12px;
+  border: 1px solid rgba(101, 214, 173, 0.48);
+  border-radius: 7px;
+  background: rgba(24, 28, 32, 0.96);
+  color: #edf4f1;
+  box-shadow: 0 12px 34px var(--shadow);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.source-toast.hidden {
+  display: none;
 }
 
 .preview-shell {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: #0c0e10;
@@ -396,6 +438,7 @@ textarea,
 
 .viewport {
   flex: 1;
+  min-height: 0;
   display: grid;
   place-items: center;
   padding: 18px;
@@ -410,6 +453,15 @@ textarea,
   border: 1px solid #36414a;
   box-shadow: 0 18px 55px var(--shadow);
   background: #0e1113;
+  cursor: grab;
+}
+
+.viewport canvas.drag-target {
+  cursor: crosshair;
+}
+
+.viewport canvas.dragging {
+  cursor: grabbing;
 }
 
 .node-list {
@@ -611,7 +663,21 @@ input:disabled {
 }
 
 @media (max-width: 1100px) {
+  html,
+  body,
+  #app {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+
+  body {
+    overflow: auto;
+  }
+
   .workspace {
+    height: auto;
+    min-height: calc(100vh - 69px);
     grid-template-columns: 1fr;
   }
 

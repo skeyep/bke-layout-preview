@@ -38,6 +38,105 @@ var pos = [120 + 8, 240 / 2];
   assert.deepEqual(scene.roots.get('basic_layer').children, ['100']);
 });
 
+test('parseScene resolves quoted string concatenation used in image paths', () => {
+  const scene = parseScene(`
+##
+var cg_folder = "album_01";
+##
+@sprite index=120 file="ui/extra/thumb_"+cg_folder+".png"
+`);
+
+  assert.equal(scene.nodes.get('120').file, 'ui/extra/thumb_album_01.png');
+});
+
+test('parseScene expands simple for/next loops with variables', () => {
+  const scene = parseScene(`
+##
+var folders = ["a", "b", "c"];
+##
+for (var i=0; i<folders.length; i++)
+@sprite index=8000+i file="ui/extra/thumb_"+folders[i]+".png"
+@addto index=8000+i target=basic_layer pos=[100+i*40,200] zorder=i
+next
+`);
+
+  assert.deepEqual([...scene.nodes.keys()], ['8000', '8001', '8002']);
+  assert.equal(scene.nodes.get('8002').file, 'ui/extra/thumb_c.png');
+  assert.deepEqual(scene.nodes.get('8002').pos, [180, 200]);
+  assert.equal(scene.nodes.get('8002').zorder, 2);
+});
+
+test('parseScene expands BKE range loops and dotted variables', () => {
+  const scene = parseScene(`
+##
+tf.card_positions = [[10, 20], [30, 40]];
+tf.count = tf.card_positions.length;
+##
+@for var=i range=range(0,tf.count)
+@sprite index=500+i file="ui/card_frame"
+@addto index=500+i target=basic_layer pos=tf.card_positions[i] zorder=i
+@next
+`);
+
+  assert.deepEqual([...scene.nodes.keys()], ['500', '501']);
+  assert.deepEqual(scene.nodes.get('501').pos, [30, 40]);
+  assert.equal(scene.nodes.get('501').zorder, 1);
+});
+
+test('parseScene follows same-file calls and stops at return or jumped label', () => {
+  const scene = parseScene(`
+*main
+@call label="*draw"
+@jump "*idle"
+
+*draw
+@sprite index=100 file="ui/panel_main"
+@addto index=100 target=basic_layer pos=[11,22]
+@return
+
+*idle
+@waitbutton
+
+*exit
+@remove index=100 delete=true
+@return
+`);
+
+  assert.equal(scene.nodes.has('100'), true);
+  assert.deepEqual(scene.nodes.get('100').pos, [11, 22]);
+});
+
+test('spriteopt updates disabled and visible state', () => {
+  const scene = parseScene(`
+@button index=300 idle="button/idle" disable="button/disable"
+@addto index=300 target=basic_layer pos=[0,0]
+@spriteopt index=300 disable=true
+@sprite index=301 file="ui/hidden"
+@addto index=301 target=basic_layer pos=[0,0]
+@spriteopt index=301 visible=false
+`);
+
+  const button = scene.nodes.get('300');
+  assert.equal(button.disabled, true);
+  assert.equal(displayFile(scene, button), 'button/disable');
+  assert.equal(scene.nodes.get('301').visible, false);
+});
+
+test('unsupported command notices are classified and grouped', () => {
+  const scene = parseScene(`
+@waitbutton
+@waitbutton
+@call storage="common.ks"
+@particle name="shine"
+@unknownthing foo=1
+`);
+
+  assert.ok(scene.warnings.some((warning) => warning.includes('无视觉影响') && warning.includes('@waitbutton') && warning.includes('共 2 次')));
+  assert.ok(scene.warnings.some((warning) => warning.includes('可能影响布局') && warning.includes('@call')));
+  assert.ok(scene.warnings.some((warning) => warning.includes('不支持') && warning.includes('@particle')));
+  assert.ok(scene.warnings.some((warning) => warning.includes('不支持') && warning.includes('@unknownthing')));
+});
+
 test('buttonex display resolves through its idle sprite', () => {
   const scene = parseScene(`
 @sprite index=8101 file="ui/extra/cg_card_idle"
